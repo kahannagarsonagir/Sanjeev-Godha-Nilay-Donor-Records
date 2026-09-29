@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reports — Doctor Sanjeev Godha Nilay</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-mark" id="sbMark"></div>
+    <div class="sidebar-title">Sanjeev Godha Nilay</div>
+    <div class="sidebar-sub">PARMAGAM SHWRAK TRUST</div>
+
+    <nav class="sidebar-nav">
+      <a href="entry.html" id="navEntry">New Entry</a>
+      <a href="reports.html" class="active">Reports</a>
+    </nav>
+
+    <div class="sidebar-user">
+      <span class="name" id="sbUserName">—</span>
+      <span class="role" id="sbUserRole">—</span>
+      <button id="sbLogout">Sign out</button>
+    </div>
+  </aside>
+
+  <main class="content">
+    <div class="page-head">
+      <div class="kicker">DONOR RECORDS</div>
+      <h1>Donation Reports</h1>
+      <p>A live view of every donation recorded for the guest house, drawn directly from the trust's donor register.</p>
+    </div>
+
+    <div id="loadingState" class="empty-state"><h3>Loading donor records…</h3></div>
+
+    <div id="reportBody" style="display:none">
+      <div class="stat-strip">
+        <div class="stat"><div class="label">Total Donors</div><div class="value" id="statCount">0</div></div>
+        <div class="stat"><div class="label">Total Collected</div><div class="value" id="statTotal">₹0</div></div>
+        <div class="stat"><div class="label">This Month</div><div class="value" id="statMonth">₹0</div></div>
+        <div class="stat"><div class="label">Average Donation</div><div class="value" id="statAvg">₹0</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Monthly Collection</h2></div>
+        <div class="chart-wrap" id="chartWrap"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>All Donors</h2></div>
+
+        <div class="toolbar">
+          <div class="field grow">
+            <label for="searchBox">Search</label>
+            <input type="text" id="searchBox" placeholder="Name, firm, mobile, receipt no…">
+          </div>
+          <div class="field">
+            <label for="modeFilter">Mode of Payment</label>
+            <select id="modeFilter">
+              <option value="">All</option>
+              <option value="Cash">Cash</option>
+              <option value="Cheque">Cheque</option>
+              <option value="UPI">UPI</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="fromDate">From</label>
+            <input type="date" id="fromDate">
+          </div>
+          <div class="field">
+            <label for="toDate">To</label>
+            <input type="date" id="toDate">
+          </div>
+          <button class="btn btn-secondary" id="exportBtn">Export CSV</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Receipt No</th>
+                <th>Date</th>
+                <th>Donor Name</th>
+                <th>Firm / Business</th>
+                <th>Mobile</th>
+                <th>Amount</th>
+                <th>Mode</th>
+                <th>Purpose</th>
+                <th>Family / Relatives</th>
+                <th>Entered By</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+        <div id="emptyRows" class="empty-state" style="display:none">
+          <h3>No donations match these filters</h3>
+          <p>Try clearing the search box or the date range.</p>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/app.js"></script>
+<script>
+const session = requireRole(['viewer', 'admin']);
+let allDonors = [];
+
+if (session) {
+  document.getElementById('sbMark').innerHTML = archSVG;
+  renderSidebarUser(session);
+  if (session.role !== 'admin') document.getElementById('navEntry').remove();
+  loadDonors();
+}
+
+async function loadDonors(){
+  try {
+    const result = await apiGet({ action: 'getDonors', u: session.u, p: session.p });
+    if (!result.ok) {
+      document.getElementById('loadingState').innerHTML = `<h3>Could not load records</h3><p>${result.error || ''}</p>`;
+      return;
+    }
+    allDonors = result.donors || [];
+    document.getElementById('loadingState').style.display = 'none';
+    document.getElementById('reportBody').style.display = 'block';
+    renderStats(allDonors);
+    renderChart(allDonors);
+    applyFilters();
+  } catch (err) {
+    document.getElementById('loadingState').innerHTML = `<h3>Could not reach the server</h3><p>Check your internet connection and try again.</p>`;
+  }
+}
+
+function money(n){
+  const num = Number(n) || 0;
+  return '₹' + num.toLocaleString('en-IN');
+}
+
+function renderStats(donors){
+  const total = donors.reduce((s, d) => s + (Number(d['Donation Amount']) || 0), 0);
+  const now = new Date();
+  const monthTotal = donors
+    .filter(d => {
+      const t = new Date(d['Timestamp']);
+      return t.getFullYear() === now.getFullYear() && t.getMonth() === now.getMonth();
+    })
+    .reduce((s, d) => s + (Number(d['Donation Amount']) || 0), 0);
+
+  document.getElementById('statCount').textContent = donors.length;
+  document.getElementById('statTotal').textContent = money(total);
+  document.getElementById('statMonth').textContent = money(monthTotal);
+  document.getElementById('statAvg').textContent = money(donors.length ? Math.round(total / donors.length) : 0);
+}
+
+function renderChart(donors){
+  const byMonth = {};
+  donors.forEach(d => {
+    const t = new Date(d['Timestamp']);
+    if (isNaN(t)) return;
+    const key = t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0');
+    byMonth[key] = (byMonth[key] || 0) + (Number(d['Donation Amount']) || 0);
+  });
+  const keys = Object.keys(byMonth).sort().slice(-12);
+  const wrap = document.getElementById('chartWrap');
+
+  if (keys.length === 0) {
+    wrap.innerHTML = '<p>No data to chart yet.</p>';
+    return;
+  }
+
+  const max = Math.max(...keys.map(k => byMonth[k]), 1);
+  const barW = 46, gap = 18, chartH = 160, leftPad = 10, topPad = 10;
+  const width = keys.length * (barW + gap) + leftPad;
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  let bars = '';
+  keys.forEach((k, i) => {
+    const val = byMonth[k];
+    const h = Math.max((val / max) * chartH, 3);
+    const x = leftPad + i * (barW + gap);
+    const y = topPad + (chartH - h);
+    const [yr, mo] = k.split('-');
+    bars += `
+      <rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="#6E1423" opacity="0.85"></rect>
+      <text x="${x + barW/2}" y="${topPad + chartH + 18}" text-anchor="middle" font-size="11" fill="#6B5D4F" font-family="Work Sans, sans-serif">${monthNames[parseInt(mo,10)-1]} '${yr.slice(2)}</text>
+      <text x="${x + barW/2}" y="${y - 6}" text-anchor="middle" font-size="10" fill="#4A0E18" font-family="Work Sans, sans-serif" font-weight="600">${val >= 1000 ? Math.round(val/1000) + 'k' : val}</text>
+    `;
+  });
+
+  wrap.innerHTML = `<svg width="${width}" height="${topPad + chartH + 30}" viewBox="0 0 ${width} ${topPad + chartH + 30}">${bars}</svg>`;
+}
+
+function applyFilters(){
+  const q = document.getElementById('searchBox').value.trim().toLowerCase();
+  const mode = document.getElementById('modeFilter').value;
+  const from = document.getElementById('fromDate').value;
+  const to = document.getElementById('toDate').value;
+
+  const filtered = allDonors.filter(d => {
+    if (mode && d['Mode of Payment'] !== mode) return false;
+    if (from && d['Date of Payment'] && String(d['Date of Payment']).slice(0,10) < from) return false;
+    if (to && d['Date of Payment'] && String(d['Date of Payment']).slice(0,10) > to) return false;
+    if (q) {
+      const hay = [d['Donor Name'], d['Firm Name'], d['Mobile Number'], d['Receipt No'], d['Type of Business']]
+        .join(' ').toLowerCase();
+      if (hay.indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+
+  renderTable(filtered);
+}
+
+function renderTable(rows){
+  const tbody = document.getElementById('tableBody');
+  const empty = document.getElementById('emptyRows');
+
+  if (rows.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  tbody.innerHTML = rows.map(d => {
+    const modeClass = d['Mode of Payment'] === 'Cash' ? 'pill-cash' : d['Mode of Payment'] === 'Cheque' ? 'pill-cheque' : 'pill-upi';
+    const dateDisplay = d['Date of Payment'] ? new Date(d['Date of Payment']).toLocaleDateString('en-IN') : '—';
+    return `<tr>
+      <td>${escapeHtml(d['Receipt No'])}</td>
+      <td>${dateDisplay}</td>
+      <td>${escapeHtml(d['Donor Name'])}</td>
+      <td>${escapeHtml([d['Firm Name'], d['Type of Business']].filter(Boolean).join(' — '))}</td>
+      <td>${escapeHtml(d['Mobile Number'])}</td>
+      <td class="amount-cell">${money(d['Donation Amount'])}</td>
+      <td><span class="pill ${modeClass}">${escapeHtml(d['Mode of Payment'])}</span></td>
+      <td>${escapeHtml(d['Purpose / Occasion'])}</td>
+      <td>${escapeHtml(d['Family Members & Relatives'])}</td>
+      <td>${escapeHtml(d['Entered By'])}</td>
+    </tr>`;
+  }).join('');
+}
+
+function escapeHtml(v){
+  if (v === undefined || v === null) return '';
+  return String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+['searchBox','modeFilter','fromDate','toDate'].forEach(id => {
+  document.getElementById(id).addEventListener('input', applyFilters);
+  document.getElementById(id).addEventListener('change', applyFilters);
+});
+
+document.getElementById('exportBtn').addEventListener('click', () => {
+  if (!allDonors.length) return;
+  const headers = Object.keys(allDonors[0]);
+  const csvRows = [headers.join(',')];
+  allDonors.forEach(d => {
+    csvRows.push(headers.map(h => `"${String(d[h] ?? '').replace(/"/g, '""')}"`).join(','));
+  });
+  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'donor-records-' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+</script>
+</body>
+</html>

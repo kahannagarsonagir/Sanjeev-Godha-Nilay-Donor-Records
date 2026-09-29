@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Doctor Sanjeev Godha Nilay — Donor Records</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="login-shell">
+  <div class="login-card">
+    <div class="arch-mark" id="archMark"></div>
+    <div class="login-eyebrow">Parmagam Shwrak Trust · Sonagir</div>
+    <h1 class="login-title">Doctor Sanjeev Godha Nilay</h1>
+    <div class="login-sub">DONOR RECORDS</div>
+
+    <div class="login-panel">
+      <div class="login-error" id="loginError"></div>
+      <form id="loginForm">
+        <div class="field">
+          <label for="u">Username</label>
+          <input type="text" id="u" autocomplete="username" required>
+        </div>
+        <div class="field">
+          <label for="p">Password</label>
+          <input type="password" id="p" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="btn" id="loginBtn">Sign in</button>
+      </form>
+    </div>
+
+    <div class="login-note">Data entry &amp; management access only.<br>Contact the trust office for a login.</div>
+  </div>
+</div>
+
+<script src="assets/app.js"></script>
+<script>
+document.getElementById('archMark').innerHTML = archSVG;
+
+// If already logged in, go straight to the right page.
+(function(){
+  const s = getSession();
+  if (s && s.role) {
+    window.location.href = (s.role === 'viewer') ? 'reports.html' : 'entry.html';
+  }
+})();
+
+document.getElementById('loginForm').addEventListener('submit', async function(e){
+  e.preventDefault();
+  const errEl = document.getElementById('loginError');
+  const btn = document.getElementById('loginBtn');
+  errEl.classList.remove('show');
+
+  const u = document.getElementById('u').value.trim();
+  const p = document.getElementById('p').value;
+
+  if (API_URL.indexOf('PASTE_YOUR') === 0) {
+    errEl.textContent = 'The site is not connected to Google Sheets yet. See README.md — paste your Apps Script URL into assets/app.js.';
+    errEl.classList.add('show');
+    return;
+  }
+
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  try {
+    const result = await apiPost({ action: 'login', u, p });
+    if (result.ok) {
+      saveSession({ u, p, role: result.role, name: result.name });
+      window.location.href = (result.role === 'viewer') ? 'reports.html' : 'entry.html';
+    } else {
+      errEl.textContent = result.error || 'Sign in failed.';
+      errEl.classList.add('show');
+    }
+  } catch (err) {
+    errEl.textContent = 'Could not reach the server. Please check your internet connection and try again.';
+    errEl.classList.add('show');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Sign in';
+  }
+});
+</script>
+</body>
+</html>
